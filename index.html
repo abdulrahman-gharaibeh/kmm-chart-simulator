@@ -874,6 +874,7 @@
   }
 
   .group.hidden { display: none; }
+  .group.type-hidden { display: none; }
   .field.hidden { display: none; }
 
   @media (max-width: 1100px) {
@@ -1284,30 +1285,83 @@ Dec,90</textarea>
 <div class="toast" id="toast"></div>
 
 <script>
+// charts: which chart types a group applies to. Omitted = ALL types.
+const ALL_TYPES = ["LINE","PIE","VERTICAL_BAR","HORIZONTAL_BAR","MULTI_LINE"];
 const SCHEMA = [
+  { group: "Chart Type", icon: "📊", fields: [
+    { key: "chartType", type: "select", options: ["LINE","PIE","VERTICAL_BAR","HORIZONTAL_BAR","MULTI_LINE"], default: "LINE" },
+  ]},
   { group: "Animation", icon: "✨", fields: [
     { key: "enableAnimation", type: "bool", default: true },
     { key: "animationDuration", type: "int", default: 1200, unit: "ms" },
+  ]},
+  { group: "Line Draw Animation", icon: "🎬", charts: ["LINE","MULTI_LINE"], fields: [
     { key: "enableLineDrawAnimation", type: "bool", default: true },
     { key: "lineDrawAnimationDuration", type: "int", default: 2000, unit: "ms" },
     { key: "hideGlowAfterAnimation", type: "bool", default: true },
   ]},
-  { group: "Line Chart", icon: "📈", fields: [
+  { group: "Bar Animation", icon: "🎬", charts: ["VERTICAL_BAR","HORIZONTAL_BAR"], fields: [
+    { key: "staggerDelay", type: "int", default: 100, unit: "ms" },
+  ]},
+  { group: "Pie / Donut", icon: "🥧", charts: ["PIE"], fields: [
+    { key: "scalePercentage", type: "float", default: 1.0 },
+    { key: "thickness", type: "int", default: 16, unit: "dp" },
+    { key: "centerHoleSize", type: "float", default: 0.0 },
+    { key: "sweepFromZero", type: "bool", default: true },
+    { key: "enableClickAnimation", type: "bool", default: true },
+    { key: "clickScale", type: "float", default: 1.1 },
+  ]},
+  { group: "Pie Labels", icon: "🏷️", charts: ["PIE"], fields: [
+    { key: "showOuterLabels", type: "bool", default: true },
+    { key: "labelDistance", type: "int", default: 25, unit: "dp" },
+    { key: "labelTextSize", type: "int", default: 12, unit: "sp" },
+  ]},
+  { group: "Line Style", icon: "📈", charts: ["LINE","MULTI_LINE"], fields: [
     { key: "lineColor", type: "color", default: "#55BA85" },
     { key: "lineWidth", type: "float", default: 4 },
     { key: "smoothCurve", type: "bool", default: true },
     { key: "curveTension", type: "float", default: 0.6 },
     { key: "pointMarkerSize", type: "int", default: 6, unit: "dp" },
   ]},
-  { group: "Grid", icon: "▦", fields: [
+  { group: "Bar Sizing", icon: "📊", charts: ["VERTICAL_BAR","HORIZONTAL_BAR"], fields: [
+    { key: "barSpacing", type: "int", default: 8, unit: "dp" },
+    { key: "autoBarWidth", type: "bool", default: true },
+    { key: "minBarWidth", type: "int", default: 24, unit: "dp" },
+    { key: "maxBarWidth", type: "int", default: 80, unit: "dp" },
+  ]},
+  { group: "Bar Corners", icon: "⚪", charts: ["VERTICAL_BAR","HORIZONTAL_BAR"], fields: [
+    { key: "topStartCornerRadius", type: "int", default: 8, unit: "dp" },
+    { key: "topEndCornerRadius", type: "int", default: 8, unit: "dp" },
+    { key: "bottomStartCornerRadius", type: "int", default: 0, unit: "dp" },
+    { key: "bottomEndCornerRadius", type: "int", default: 0, unit: "dp" },
+  ]},
+  { group: "Bar Labels", icon: "🏷️", charts: ["VERTICAL_BAR","HORIZONTAL_BAR"], fields: [
+    { key: "labelTextSize", type: "int", default: 12, unit: "sp" },
+    { key: "labelTextColor", type: "color", default: "#000000" },
+    { key: "labelSelectedTextColor", type: "color", default: null, nullable: true },
+    { key: "secondaryLabelTextSize", type: "int", default: 10, unit: "sp" },
+    { key: "secondaryLabelTextColor", type: "color", default: "#808080" },
+  ]},
+  { group: "Selection", icon: "🎯", charts: ["VERTICAL_BAR","HORIZONTAL_BAR"], fields: [
+    { key: "enableSlotSelection", type: "bool", default: true },
+    { key: "selectedSlotScale", type: "float", default: 1.1 },
+    { key: "unselectedSlotOpacity", type: "float", default: 0.4 },
+    { key: "selectedSlotHighlightColor", type: "color", default: null, nullable: true },
+    { key: "enableHoverEffects", type: "bool", default: true },
+    { key: "hoverScale", type: "float", default: 1.05 },
+  ]},
+  { group: "Percentage Box", icon: "💯", charts: ["PIE","VERTICAL_BAR","HORIZONTAL_BAR"], fields: [
+    { key: "showPercentageRectangles", type: "bool", default: true },
+  ]},
+  { group: "Grid", icon: "▦", charts: ["LINE","MULTI_LINE"], fields: [
     { key: "gridDisplayMode", type: "select", options: ["NONE","HORIZONTAL","VERTICAL","BOTH"], default: "VERTICAL" },
     { key: "gridLineColor", type: "color", default: "#80808080", argb: true },
   ]},
-  { group: "Pagination", icon: "📄", fields: [
+  { group: "Pagination", icon: "📄", charts: ["LINE"], fields: [
     { key: "enablePagination", type: "bool", default: true },
     { key: "itemsPerPage", type: "int", default: 8 },
   ]},
-  { group: "Chips / Filters", icon: "🔘", fields: [
+  { group: "Chips / Filters", icon: "🔘", charts: ["LINE"], fields: [
     { key: "enableChipSelection", type: "bool", default: true },
     { key: "showChipDetailsOnClick", type: "bool", default: false },
     { key: "chipBackgroundColor", type: "color", default: "#F5F5F5" },
@@ -1317,7 +1371,7 @@ const SCHEMA = [
     { key: "chipCornerRadius", type: "int", default: 16, unit: "dp" },
     { key: "chipSpacing", type: "int", default: 8, unit: "dp" },
   ]},
-  { group: "Line Gradient & Glow", icon: "🌟", fields: [
+  { group: "Line Gradient & Glow", icon: "🌟", charts: ["LINE","MULTI_LINE"], fields: [
     { key: "enableLineGradient", type: "bool", default: false },
     { key: "lineGradientStartColor", type: "color", default: null, nullable: true },
     { key: "lineGradientEndColor", type: "color", default: null, nullable: true },
@@ -1326,35 +1380,37 @@ const SCHEMA = [
     { key: "lineGlowRadius", type: "float", default: 15 },
     { key: "lineGlowAlpha", type: "float", default: 0.8 },
   ]},
-  { group: "Area Fill", icon: "🌊", fields: [
+  { group: "Area Fill", icon: "🌊", charts: ["LINE"], fields: [
     { key: "showAreaFill", type: "bool", default: false },
     { key: "areaFillStartColor", type: "color", default: null, nullable: true },
     { key: "areaFillEndColor", type: "color", default: null, nullable: true },
     { key: "areaFillStartAlpha", type: "float", default: 0.4 },
     { key: "areaFillEndAlpha", type: "float", default: 0.05 },
   ]},
-  { group: "Layout & Padding", icon: "📐", fields: [
+  { group: "Size", icon: "📐", fields: [
+    { key: "chartHeight", type: "int", default: 250, unit: "dp" },
+  ]},
+  { group: "Layout & Padding", icon: "📏", charts: ["LINE"], fields: [
     { key: "chartVerticalPadding", type: "int", default: 12, unit: "dp" },
     { key: "chartHorizontalPadding", type: "int", default: 0, unit: "dp" },
     { key: "chartPaddingTop", type: "int", default: 0, unit: "dp" },
     { key: "chartPaddingBottom", type: "int", default: 0, unit: "dp" },
     { key: "chartPaddingStart", type: "int", default: 0, unit: "dp" },
     { key: "chartPaddingEnd", type: "int", default: 0, unit: "dp" },
-    { key: "chartHeight", type: "int", default: 250, unit: "dp" },
   ]},
   { group: "Card Container", icon: "🃏", fields: [
     { key: "showCardContainer", type: "bool", default: false },
     { key: "cardCornerRadius", type: "int", default: 12, unit: "dp" },
     { key: "cardBackgroundColor", type: "color", default: "#FFFFFF" },
   ]},
-  { group: "Crosshair", icon: "✚", fields: [
+  { group: "Crosshair", icon: "✚", charts: ["LINE","MULTI_LINE"], fields: [
     { key: "showCrosshairVertical", type: "bool", default: true },
     { key: "showCrosshairHorizontal", type: "bool", default: true },
     { key: "crosshairColor", type: "color", default: "#808080" },
     { key: "crosshairAlpha", type: "float", default: 0.5 },
     { key: "crosshairWidth", type: "float", default: 1 },
   ]},
-  { group: "Touch / Click Tooltip", icon: "👉", fields: [
+  { group: "Touch / Click Tooltip", icon: "👉", charts: ["LINE"], fields: [
     { key: "showScrubbingTooltip", type: "bool", default: true },
     { key: "scrubbingTooltipBackgroundColor", type: "color", default: "#55BA85" },
     { key: "scrubbingTooltipTextColor", type: "color", default: "#FFFFFF" },
@@ -1364,31 +1420,31 @@ const SCHEMA = [
     { key: "scrubbingGlowRadius", type: "float", default: 20 },
     { key: "scrubbingGlowAlpha", type: "float", default: 0.7 },
   ]},
-  { group: "Data Points", icon: "⚫", fields: [
+  { group: "Data Points", icon: "⚫", charts: ["LINE"], fields: [
     { key: "showAllDataPoints", type: "bool", default: false },
     { key: "dataPointsWithBackground", type: "bool", default: true },
     { key: "dataPointBackgroundColor", type: "color", default: null, nullable: true },
   ]},
-  { group: "Axis Visibility", icon: "👁️", fields: [
+  { group: "Axis Visibility", icon: "👁️", charts: ["LINE","MULTI_LINE"], fields: [
     { key: "showYAxisLabels", type: "bool", default: false },
     { key: "showXAxisLabels", type: "bool", default: true },
   ]},
-  { group: "Y-Axis Position", icon: "📍", fields: [
+  { group: "Y-Axis Position", icon: "📍", charts: ["LINE"], fields: [
     { key: "yAxisPosition", type: "select", options: ["START","END"], default: "START" },
     { key: "yAxisVerticalPadding", type: "int", default: 0, unit: "dp" },
     { key: "yAxisHorizontalPadding", type: "int", default: 0, unit: "dp" },
   ]},
-  { group: "Top Filters", icon: "🎚️", fields: [
+  { group: "Top Filters", icon: "🎚️", charts: ["LINE"], fields: [
     { key: "showTopFilters", type: "bool", default: true },
   ]},
-  { group: "On-Click Enhancements", icon: "💎", fields: [
+  { group: "On-Click Enhancements", icon: "💎", charts: ["LINE"], fields: [
     { key: "showTitleOnClick", type: "bool", default: false },
     { key: "defaultSelectedIndex", type: "int", default: null, nullable: true },
   ]},
-  { group: "Data Sorting", icon: "🔀", fields: [
+  { group: "Data Sorting", icon: "🔀", charts: ["LINE"], fields: [
     { key: "sortOrder", type: "select", options: ["NONE","ASCENDING","DESCENDING"], default: "NONE" },
   ]},
-  { group: "Bottom Divider", icon: "➖", fields: [
+  { group: "Bottom Divider", icon: "➖", charts: ["LINE"], fields: [
     { key: "showBottomDivider", type: "bool", default: false },
     { key: "bottomDividerVerticalPadding", type: "int", default: 10, unit: "dp" },
     { key: "bottomDividerColor", type: "color", default: "#80808080", argb: true },
@@ -1399,7 +1455,8 @@ const SCHEMA = [
 const COLLAPSED_BY_DEFAULT = new Set([
   "Card Container", "Crosshair", "Data Points",
   "Y-Axis Position", "Top Filters", "Axis Visibility",
-  "Bottom Divider", "Layout & Padding",
+  "Bottom Divider", "Layout & Padding", "Bar Corners",
+  "Bar Labels", "Selection", "Pie Labels", "Percentage Box",
 ]);
 
 const PRESETS = {
@@ -1457,11 +1514,14 @@ function parseData(text) {
 const formArea = document.getElementById("formArea");
 const inputs = {};
 
+const groupEls = [];
 SCHEMA.forEach((group, idx) => {
   const groupDiv = document.createElement("div");
   groupDiv.className = "group" + (COLLAPSED_BY_DEFAULT.has(group.group) ? " collapsed" : "");
   groupDiv.dataset.group = group.group.toLowerCase();
+  groupDiv.dataset.charts = (group.charts || ALL_TYPES).join(",");
   groupDiv.style.animationDelay = (idx * 0.03) + "s";
+  groupEls.push(groupDiv);
   groupDiv.innerHTML = `
     <div class="group-header">
       <div class="group-icon">${group.icon}</div>
@@ -1537,7 +1597,7 @@ SCHEMA.forEach((group, idx) => {
       input.value = f.default ?? "";
       input.addEventListener("input", onChange);
     }
-    inputs[f.key] = { input, field: f, row };
+    (inputs[f.key] = inputs[f.key] || []).push({ input, field: f, row, groupDiv });
     row.appendChild(input);
     body.appendChild(row);
   });
@@ -1548,24 +1608,31 @@ SCHEMA.forEach((group, idx) => {
   });
 });
 
+function readEntry({ input, field }) {
+  let val;
+  if (input._getValue) val = input._getValue();
+  else if (field.type === "int") val = input.value === "" ? null : parseInt(input.value, 10);
+  else if (field.type === "float") val = input.value === "" ? null : parseFloat(input.value);
+  else val = input.value;
+  if (val === null && !field.nullable) val = field.default;
+  return val;
+}
 function readForm() {
   const c = {};
-  for (const [key, { input, field }] of Object.entries(inputs)) {
-    let val;
-    if (input._getValue) val = input._getValue();
-    else if (field.type === "int") val = input.value === "" ? null : parseInt(input.value, 10);
-    else if (field.type === "float") val = input.value === "" ? null : parseFloat(input.value);
-    else val = input.value;
-    if (val === null && !field.nullable) val = field.default;
-    c[key] = val;
+  for (const [key, entries] of Object.entries(inputs)) {
+    // Prefer the control whose group is visible for the current chart type
+    const e = entries.find(en => !en.groupDiv.classList.contains("type-hidden")) || entries[0];
+    c[key] = readEntry(e);
   }
   return c;
 }
 function writeForm(c) {
-  for (const [key, { input, field }] of Object.entries(inputs)) {
+  for (const [key, entries] of Object.entries(inputs)) {
     const v = c[key];
-    if (input._setValue) input._setValue(v);
-    else input.value = v == null ? "" : v;
+    entries.forEach(({ input }) => {
+      if (input._setValue) input._setValue(v);
+      else input.value = v == null ? "" : v;
+    });
   }
 }
 
@@ -1636,7 +1703,30 @@ const canvas = document.getElementById("chartCanvas");
 const ctx = canvas.getContext("2d");
 const dpr = window.devicePixelRatio || 1;
 
+// Pleasant palette used for pie slices / bars (SDK pulls from item colors;
+// the simulator data has no per-item colors, so we derive a consistent set).
+const PALETTE = ["#6366f1","#22c55e","#f59e0b","#ec4899","#06b6d4","#a855f7","#ef4444","#14b8a6","#f97316","#3b82f6","#84cc16","#e11d48"];
+function sizeCanvas(cssWidth, cssHeight) {
+  canvas.width = cssWidth * dpr;
+  canvas.height = cssHeight * dpr;
+  canvas.style.width = cssWidth + "px";
+  canvas.style.height = cssHeight + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+}
+
+/* DISPATCHER — pick the renderer matching the SDK chart type */
 function render() {
+  switch (config.chartType) {
+    case "PIE": return renderPie();
+    case "VERTICAL_BAR": return renderVerticalBar();
+    case "HORIZONTAL_BAR": return renderHorizontalBar();
+    case "MULTI_LINE": return renderMultiLine();
+    default: return renderLine();
+  }
+}
+
+function renderLine() {
   const c = config;
   const items = processData(data, c);
   const chartHeight = c.chartHeight || 250;
@@ -1932,49 +2022,461 @@ function drawChips(c, items, chartLeft, chartRight, y) {
   });
 }
 
-/* CHART LINE DRAW ANIMATION */
+/* ═══════════════════════════════════════════════════════════════
+   PIE / DONUT  — mirrors DynamicPieChart.kt
+   ═══════════════════════════════════════════════════════════════ */
+function renderPie() {
+  const c = config;
+  const items = data;
+  const cssWidth = canvas.clientWidth || 700;
+  const cssHeight = (c.chartHeight || 250) + 60;
+  sizeCanvas(cssWidth, cssHeight);
+  if (c.showCardContainer) {
+    ctx.fillStyle = parseColor(c.cardBackgroundColor, "#FFFFFF");
+    roundRect(ctx, 0, 0, cssWidth, cssHeight, c.cardCornerRadius); ctx.fill();
+  }
+  if (!items.length) return;
+  const total = items.reduce((s, d) => s + d.value, 0) || 1;
+  const cx = cssWidth / 2, cy = cssHeight / 2;
+  const labelPad = c.showOuterLabels ? (c.labelDistance + 46) : 16;
+  const radius = Math.max(20, Math.min(cssWidth, cssHeight) / 2 - labelPad);
+
+  const scalePct = c.scalePercentage ?? 1;
+  const totalSweepDeg = 360 * scalePct;
+  const startDeg = scalePct >= 1 ? -90 : (270 - totalSweepDeg / 2);
+  const gapDeg = (items.length > 1 && scalePct >= 1) ? 2 : 0;
+  const D2R = Math.PI / 180;
+  const n = items.length;
+  const p = drawAnimProgress;
+
+  let cursor = startDeg;
+  items.forEach((item, i) => {
+    const fullSweep = (item.value / total) * totalSweepDeg - gapDeg;
+    // entry animation
+    let segProg;
+    if (c.sweepFromZero) {
+      const segDur = 1 / n, segStart = i / n;
+      segProg = Math.min(1, Math.max(0, (p - segStart) / segDur));
+    } else { segProg = p; }
+    const sweep = Math.max(0, fullSweep * segProg);
+    const a0 = cursor * D2R;
+    const a1 = (cursor + sweep) * D2R;
+    const mid = (cursor + sweep / 2) * D2R;
+
+    const isSel = i === selectedIndex;
+    let ox = 0, oy = 0, r = radius;
+    if (isSel && c.enableClickAnimation) {
+      ox = Math.cos(mid) * 6; oy = Math.sin(mid) * 6;
+      r = radius * (c.clickScale || 1.1);
+    }
+    const col = PALETTE[i % PALETTE.length];
+    const innerR = (c.centerHoleSize > 0) ? r * c.centerHoleSize : 0;
+
+    ctx.beginPath();
+    if (innerR > 0) {
+      ctx.arc(cx + ox, cy + oy, r, a0, a1);
+      ctx.arc(cx + ox, cy + oy, innerR, a1, a0, true);
+    } else {
+      ctx.moveTo(cx + ox, cy + oy);
+      ctx.arc(cx + ox, cy + oy, r, a0, a1);
+    }
+    ctx.closePath();
+    ctx.fillStyle = col;
+    ctx.fill();
+
+    // labels
+    if (c.showOuterLabels && sweep > 0.5) {
+      const lr = radius + c.labelDistance;
+      const lx = cx + Math.cos(mid) * lr;
+      const ly = cy + Math.sin(mid) * lr;
+      ctx.fillStyle = chartBg === "white" ? "#1f2937" : "#e5e7eb";
+      ctx.font = `500 ${c.labelTextSize}px Inter, sans-serif`;
+      ctx.textAlign = Math.cos(mid) >= 0 ? "left" : "right";
+      ctx.textBaseline = "middle";
+      ctx.fillText(item.label, lx + (Math.cos(mid) >= 0 ? 4 : -4), ly - (c.showPercentageRectangles ? 9 : 0));
+      if (c.showPercentageRectangles) {
+        const pct = Math.round((item.value / total) * 100) + "%";
+        ctx.font = "600 10px Inter, sans-serif";
+        const tw = ctx.measureText(pct).width + 12;
+        const bx = ctx.textAlign === "left" ? lx + 4 : lx - 4 - tw;
+        ctx.fillStyle = withAlpha(col, 0.9);
+        roundRect(ctx, bx, ly + 3, tw, 16, 8); ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(pct, bx + tw / 2, ly + 11);
+      }
+    }
+    cursor += fullSweep + gapDeg;
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   VERTICAL BAR  — mirrors VerticalBarChart.kt
+   ═══════════════════════════════════════════════════════════════ */
+function renderVerticalBar() {
+  const c = config;
+  const items = data;
+  const cssWidth = canvas.clientWidth || 700;
+  const topPad = 26, botPad = 30;
+  const plotH = c.chartHeight || 250;
+  const cssHeight = plotH + topPad + botPad;
+  sizeCanvas(cssWidth, cssHeight);
+  if (c.showCardContainer) {
+    ctx.fillStyle = parseColor(c.cardBackgroundColor, "#FFFFFF");
+    roundRect(ctx, 0, 0, cssWidth, cssHeight, c.cardCornerRadius); ctx.fill();
+  }
+  if (!items.length) return;
+  const maxValue = 100; // SDK VerticalBarChart uses fixed 100f scale
+  const n = items.length;
+  const spacing = c.barSpacing;
+  const sidePad = 12;
+  const avail = cssWidth - sidePad * 2 - spacing * (n - 1);
+  let bw = c.autoBarWidth
+    ? Math.min(c.maxBarWidth, Math.max(c.minBarWidth, avail / n))
+    : 40;
+  const blockW = n * bw + (n - 1) * spacing;
+  let x0 = (cssWidth - blockW) / 2;
+  const baseY = topPad + plotH;
+  const p = drawAnimProgress;
+
+  items.forEach((item, i) => {
+    const isSel = i === selectedIndex;
+    const sel = c.enableSlotSelection && selectedIndex != null;
+    const scale = (sel && isSel) ? (c.selectedSlotScale || 1.1) : 1;
+    const alpha = (sel && !isSel) ? (c.unselectedSlotOpacity ?? 0.4) : 1;
+    const w = bw * scale;
+    const x = x0 + i * (bw + spacing) - (w - bw) / 2;
+    const frac = Math.min(1, Math.max(0, item.value / maxValue)) * p;
+    const h = plotH * frac;
+    const y = baseY - h;
+    ctx.globalAlpha = alpha;
+
+    // background track
+    ctx.fillStyle = "rgba(128,128,128,0.18)";
+    barPath(x, topPad, w, plotH, c, true); ctx.fill();
+
+    // value bar (vertical gradient: light → solid)
+    const col = PALETTE[i % PALETTE.length];
+    if (h > 0.5) {
+      const g = ctx.createLinearGradient(0, y, 0, baseY);
+      g.addColorStop(0, withAlpha(col, 1));
+      g.addColorStop(1, withAlpha(col, 0.75));
+      ctx.fillStyle = g;
+      barPath(x, y, w, h, c, false); ctx.fill();
+    }
+
+    // percentage box near top of bar
+    if (c.showPercentageRectangles && frac > 0.05) {
+      const pct = Math.round(item.value) + "%";
+      ctx.font = "600 10px Inter, sans-serif";
+      const tw = ctx.measureText(pct).width + 10;
+      ctx.fillStyle = "rgba(0,0,0,0.78)";
+      roundRect(ctx, x + w / 2 - tw / 2, y - 22, tw, 17, 8); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(pct, x + w / 2, y - 13);
+    }
+
+    // secondary label (top)
+    ctx.fillStyle = parseColor(c.secondaryLabelTextColor, "#808080");
+    ctx.font = `${isSel ? "700" : "400"} ${c.secondaryLabelTextSize}px Inter, sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.fillText(Math.round(item.value), x + w / 2, 16);
+
+    // primary label (bottom)
+    const lblCol = (isSel && c.labelSelectedTextColor) ? c.labelSelectedTextColor : c.labelTextColor;
+    ctx.fillStyle = parseColor(lblCol, "#000");
+    ctx.font = `${isSel ? "700" : "500"} ${c.labelTextSize}px Inter, sans-serif`;
+    ctx.fillText(item.label, x + w / 2, cssHeight - 10);
+
+    ctx.globalAlpha = 1;
+  });
+}
+function barPath(x, y, w, h, c, isBg) {
+  const tl = c.topStartCornerRadius, tr = c.topEndCornerRadius;
+  const bl = c.bottomStartCornerRadius, br = c.bottomEndCornerRadius;
+  ctx.beginPath();
+  ctx.moveTo(x + tl, y);
+  ctx.lineTo(x + w - tr, y);
+  ctx.arcTo(x + w, y, x + w, y + tr, tr);
+  ctx.lineTo(x + w, y + h - br);
+  ctx.arcTo(x + w, y + h, x + w - br, y + h, br);
+  ctx.lineTo(x + bl, y + h);
+  ctx.arcTo(x, y + h, x, y + h - bl, bl);
+  ctx.lineTo(x, y + tl);
+  ctx.arcTo(x, y, x + tl, y, tl);
+  ctx.closePath();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HORIZONTAL BAR  — mirrors HorizontalBarChart.kt
+   ═══════════════════════════════════════════════════════════════ */
+function renderHorizontalBar() {
+  const c = config;
+  const items = data;
+  const cssWidth = canvas.clientWidth || 700;
+  const n = items.length;
+  const barH = 24;
+  const rowGap = c.barSpacing + 14;
+  const rowH = barH + rowGap;
+  const cssHeight = Math.max(c.chartHeight || 250, n * rowH + 16);
+  sizeCanvas(cssWidth, cssHeight);
+  if (c.showCardContainer) {
+    ctx.fillStyle = parseColor(c.cardBackgroundColor, "#FFFFFF");
+    roundRect(ctx, 0, 0, cssWidth, cssHeight, c.cardCornerRadius); ctx.fill();
+  }
+  if (!n) return;
+  const maxValue = 100; // SDK HorizontalBarChart uses fixed 100f scale
+  const labelW = 80, valueW = 80;
+  const trackX = labelW + 8;
+  const trackW = cssWidth - labelW - valueW - 16;
+  const p = drawAnimProgress;
+  const topOffset = (cssHeight - n * rowH + rowGap) / 2;
+
+  items.forEach((item, i) => {
+    const isSel = i === selectedIndex;
+    const sel = c.enableSlotSelection && selectedIndex != null;
+    const scale = (sel && isSel) ? (c.selectedSlotScale || 1.1) : 1;
+    const alpha = (sel && !isSel) ? (c.unselectedSlotOpacity ?? 0.4) : 1;
+    const cy = topOffset + i * rowH + barH / 2;
+    const bh = barH * scale;
+    const by = cy - bh / 2;
+    ctx.globalAlpha = alpha;
+
+    // left label
+    ctx.fillStyle = (isSel && c.selectedSlotHighlightColor)
+      ? parseColor(c.selectedSlotHighlightColor) : (chartBg === "white" ? "#111827" : "#e5e7eb");
+    ctx.font = "500 14px Inter, sans-serif";
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(item.label, 8, cy);
+
+    // track + value bar
+    ctx.fillStyle = "rgba(128,128,128,0.18)";
+    roundRect(ctx, trackX, by, trackW, bh, c.topStartCornerRadius || 8); ctx.fill();
+    const frac = Math.min(1, Math.max(0, item.value / maxValue)) * p;
+    const w = trackW * frac;
+    const col = PALETTE[i % PALETTE.length];
+    if (w > 0.5) {
+      const g = ctx.createLinearGradient(trackX, 0, trackX + trackW, 0);
+      g.addColorStop(0, withAlpha(col, 1));
+      g.addColorStop(1, withAlpha(col, 0.7));
+      ctx.fillStyle = g;
+      roundRect(ctx, trackX, by, Math.max(bh, w), bh, c.topStartCornerRadius || 8); ctx.fill();
+    }
+
+    // right value
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = `700 ${c.labelTextSize}px Inter, sans-serif`;
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.fillText(Math.round(item.value) + "%", cssWidth - 8, cy);
+    ctx.globalAlpha = 1;
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MULTI-LINE  — mirrors MultiLineChart.kt (single series in sim)
+   ═══════════════════════════════════════════════════════════════ */
+function renderMultiLine() {
+  const c = config;
+  const items = data;
+  const cssWidth = canvas.clientWidth || 700;
+  const plotH = c.chartHeight || 250;
+  const cssHeight = plotH + 36;
+  sizeCanvas(cssWidth, cssHeight);
+  if (c.showCardContainer) {
+    ctx.fillStyle = parseColor(c.cardBackgroundColor, "#FFFFFF");
+    roundRect(ctx, 0, 0, cssWidth, cssHeight, c.cardCornerRadius); ctx.fill();
+  }
+  if (!items.length) return;
+  const padL = c.showYAxisLabels ? 40 : 8, padR = 8, padT = 8, padB = 24;
+  const left = padL, right = cssWidth - padR, top = padT, bottom = plotH - padB;
+  const w = right - left, h = bottom - top;
+  const maxV = Math.max(...items.map(d => d.value));
+  const minV = Math.min(...items.map(d => d.value), 0);
+  const range = (maxV - minV) || 1;
+  const p = drawAnimProgress;
+
+  // horizontal grid (5 lines) — SDK MultiLine draws these
+  ctx.strokeStyle = "rgba(180,185,200,0.35)"; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = top + h * i / 4;
+    ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
+  }
+  // y-axis labels
+  if (c.showYAxisLabels) {
+    ctx.fillStyle = "#9ca3af"; ctx.font = "10px Inter, sans-serif";
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (let i = 0; i <= 4; i++) {
+      const v = maxV - (range * i / 4);
+      const y = top + h * i / 4;
+      ctx.fillText(Math.abs(v) >= 1000 ? (v/1000).toFixed(0)+"K" : Math.round(v), left - 8, y);
+    }
+  }
+  const pts = items.map((it, i) => ({
+    x: left + (items.length === 1 ? w/2 : w * i / (items.length - 1)),
+    y: bottom - ((it.value - minV) / range) * h,
+    item: it
+  }));
+  const clipX = left + w * p;
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, clipX, cssHeight); ctx.clip();
+
+  // glow layers
+  if (c.enableLineGlow && c.lineGlowAlpha > 0) {
+    const fade = c.hideGlowAfterAnimation ? Math.max(0, 1 - Math.max(0, (p - 0.85)) * 6.67) : 1;
+    if (fade > 0.01) {
+      ctx.save();
+      ctx.shadowBlur = c.lineGlowRadius;
+      ctx.shadowColor = withAlpha(c.lineGlowColor || c.lineColor, c.lineGlowAlpha * fade);
+      drawLineStroke(c, pts, true); ctx.restore();
+    }
+  }
+  drawLineStroke(c, pts, false);
+  ctx.restore();
+
+  // points
+  pts.forEach((pt, i) => {
+    if (pt.x > clipX) return;
+    const isSel = i === selectedIndex;
+    const r = (c.pointMarkerSize / 2) * (isSel ? 1.5 : 1);
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, r + 2, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = c.lineColor;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, Math.PI*2); ctx.fill();
+  });
+
+  // x labels (≤6 all, else first/mid/last)
+  ctx.fillStyle = "#9ca3af"; ctx.font = "10px Inter, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  const showIdx = items.length <= 6
+    ? items.map((_, i) => i)
+    : [0, Math.floor(items.length / 2), items.length - 1];
+  showIdx.forEach(i => ctx.fillText(items[i].label, pts[i].x, plotH + 4));
+
+  // crosshair + tooltip
+  if (selectedIndex != null && selectedIndex < pts.length && p >= 1) {
+    const sp = pts[selectedIndex];
+    ctx.strokeStyle = "rgba(128,128,128,0.5)"; ctx.lineWidth = 1;
+    ctx.setLineDash([10, 10]);
+    ctx.beginPath(); ctx.moveTo(sp.x, top); ctx.lineTo(sp.x, bottom); ctx.stroke();
+    ctx.setLineDash([]);
+    const it = items[selectedIndex];
+    const t1 = it.label, t2 = `${Math.round(it.value)}`;
+    ctx.font = "bold 13px Inter, sans-serif";
+    const tw = Math.max(ctx.measureText(t1).width, ctx.measureText(t2).width) + 24;
+    const th = 46;
+    let tx = sp.x - tw/2;
+    tx = Math.max(4, Math.min(tx, cssWidth - tw - 4));
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowBlur = 12; ctx.shadowColor = "rgba(0,0,0,0.18)";
+    roundRect(ctx, tx, 6, tw, th, 8); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#111827"; ctx.textAlign = "center";
+    ctx.font = "bold 13px Inter, sans-serif";
+    ctx.fillText(t1, tx + tw/2, 24);
+    ctx.fillStyle = c.lineColor;
+    ctx.font = "bold 14px Inter, sans-serif";
+    ctx.fillText(t2, tx + tw/2, 42);
+  }
+}
+
+/* CHART ENTRY ANIMATION */
 function animateChart() {
   const c = config;
-  if (!c.enableAnimation || !c.enableLineDrawAnimation) {
+  const t = c.chartType || "LINE";
+  const lineFamily = (t === "LINE" || t === "MULTI_LINE");
+  // Skip animation entirely?
+  if (!c.enableAnimation || (lineFamily && !c.enableLineDrawAnimation)) {
     drawAnimProgress = 1;
     render();
     return;
   }
   drawAnimProgress = 0;
   const start = performance.now();
-  const duration = c.lineDrawAnimationDuration || c.animationDuration || 1200;
+  const duration = lineFamily
+    ? (c.lineDrawAnimationDuration || c.animationDuration || 1200)
+    : (c.animationDuration || 1200);
   function frame(now) {
-    const t = Math.min(1, (now - start) / duration);
-    drawAnimProgress = 1 - Math.pow(1 - t, 3);
+    const tt = Math.min(1, (now - start) / duration);
+    drawAnimProgress = 1 - Math.pow(1 - tt, 3);
     render();
-    if (t < 1) requestAnimationFrame(frame);
+    if (tt < 1) requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 }
 
-/* INTERACTION */
+/* INTERACTION — chart-type aware hit testing */
 canvas.addEventListener("click", (e) => {
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
-  const items = processData(data, config);
-  if (items.length === 0) return;
-  const yAxisWidth = config.showYAxisLabels ? 50 : 0;
-  const onEnd = config.yAxisPosition === "END";
-  const chartLeft = config.chartPaddingStart + (onEnd ? 0 : yAxisWidth);
-  const chartRight = canvas.clientWidth - config.chartPaddingEnd - (onEnd ? yAxisWidth : 0);
-  const chartWidth = chartRight - chartLeft;
-  const chartTop = config.chartPaddingTop;
-  const chartBottom = chartTop + config.chartHeight;
-  if (y < chartTop || y > chartBottom + 30) return;
-  const spacing = items.length === 1 ? chartWidth : chartWidth / (items.length - 1);
-  let closest = -1, closestDist = Infinity;
-  items.forEach((_, i) => {
-    const px = chartLeft + i * spacing;
-    const d = Math.abs(x - px);
-    if (d < closestDist && d < spacing / 2) { closest = i; closestDist = d; }
-  });
-  selectedIndex = closest >= 0 ? (closest === selectedIndex ? null : closest) : null;
+  const t = config.chartType || "LINE";
+  let hit = -1;
+
+  if (t === "PIE") {
+    const items = data;
+    if (!items.length) return;
+    const cssW = canvas.clientWidth, cssH = (config.chartHeight || 250) + 60;
+    const cx = cssW / 2, cy = cssH / 2;
+    const total = items.reduce((s, d) => s + d.value, 0) || 1;
+    const dx = x - cx, dy = y - cy;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const labelPad = config.showOuterLabels ? (config.labelDistance + 46) : 16;
+    const radius = Math.max(20, Math.min(cssW, cssH) / 2 - labelPad);
+    const innerR = config.centerHoleSize > 0 ? radius * config.centerHoleSize : 0;
+    if (dist <= radius * (config.clickScale || 1.1) && dist >= innerR) {
+      let ang = Math.atan2(dy, dx) * 180 / Math.PI; // -180..180
+      const scalePct = config.scalePercentage ?? 1;
+      const totalSweepDeg = 360 * scalePct;
+      const startDeg = scalePct >= 1 ? -90 : (270 - totalSweepDeg / 2);
+      let rel = (ang - startDeg) % 360; if (rel < 0) rel += 360;
+      const gapDeg = (items.length > 1 && scalePct >= 1) ? 2 : 0;
+      let cur = 0;
+      for (let i = 0; i < items.length; i++) {
+        const seg = (items[i].value / total) * totalSweepDeg;
+        if (rel >= cur && rel < cur + seg) { hit = i; break; }
+        cur += seg;
+      }
+    }
+  } else if (t === "VERTICAL_BAR") {
+    const items = data; if (!items.length) return;
+    const cssW = canvas.clientWidth;
+    const n = items.length, spacing = config.barSpacing, sidePad = 12;
+    const avail = cssW - sidePad*2 - spacing*(n-1);
+    const bw = config.autoBarWidth ? Math.min(config.maxBarWidth, Math.max(config.minBarWidth, avail/n)) : 40;
+    const blockW = n*bw + (n-1)*spacing;
+    const x0 = (cssW - blockW) / 2;
+    for (let i = 0; i < n; i++) {
+      const bx = x0 + i*(bw+spacing);
+      if (x >= bx && x <= bx + bw) { hit = i; break; }
+    }
+  } else if (t === "HORIZONTAL_BAR") {
+    const items = data; if (!items.length) return;
+    const n = items.length, barH = 24, rowGap = config.barSpacing + 14, rowH = barH + rowGap;
+    const cssH = Math.max(config.chartHeight || 250, n*rowH + 16);
+    const topOffset = (cssH - n*rowH + rowGap) / 2;
+    for (let i = 0; i < n; i++) {
+      const cyi = topOffset + i*rowH + barH/2;
+      if (Math.abs(y - cyi) <= barH/2 + rowGap/2) { hit = i; break; }
+    }
+  } else {
+    // LINE / MULTI_LINE — nearest point by x
+    const items = (t === "MULTI_LINE") ? data : processData(data, config);
+    if (!items.length) return;
+    const ml = t === "MULTI_LINE";
+    const yAxisWidth = config.showYAxisLabels ? (ml ? 40 : 50) : (ml ? 8 : 0);
+    const onEnd = config.yAxisPosition === "END";
+    const chartLeft = (ml ? yAxisWidth : config.chartPaddingStart + (onEnd ? 0 : yAxisWidth));
+    const chartRight = canvas.clientWidth - (ml ? 8 : config.chartPaddingEnd + (onEnd ? yAxisWidth : 0));
+    const chartWidth = chartRight - chartLeft;
+    const spacing = items.length === 1 ? chartWidth : chartWidth / (items.length - 1);
+    let closestDist = Infinity;
+    items.forEach((_, i) => {
+      const px = chartLeft + i * spacing;
+      const d = Math.abs(x - px);
+      if (d < closestDist && d < spacing / 2) { hit = i; closestDist = d; }
+    });
+  }
+
+  selectedIndex = hit >= 0 ? (hit === selectedIndex ? null : hit) : null;
   render();
 });
 
@@ -1989,7 +2491,9 @@ document.getElementById("applyJsonBtn").addEventListener("click", () => {
     const cc = parsed.chartConfigs || parsed;
     config = { ...defaultConfig, ...cc };
     selectedIndex = config.defaultSelectedIndex;
+    lastChartType = config.chartType;
     writeForm(config);
+    refreshVisibility();
     jsonError.classList.remove("visible");
     animateChart();
     showToast("✓ Configuration applied", "success");
@@ -2026,7 +2530,9 @@ document.getElementById("exportBtn").addEventListener("click", () => {
 document.getElementById("resetBtn").addEventListener("click", () => {
   config = { ...defaultConfig };
   selectedIndex = config.defaultSelectedIndex;
+  lastChartType = config.chartType;
   writeForm(config);
+  refreshVisibility();
   updateJsonEditor();
   animateChart();
   showToast("↺ Reset to defaults", "info");
@@ -2045,9 +2551,20 @@ document.getElementById("dataInput").addEventListener("input", () => {
 });
 
 /* SEARCH */
+/* CHART-TYPE VISIBILITY — only show config groups the SDK actually uses
+   for the currently selected chart type. */
+function refreshVisibility() {
+  const t = config.chartType || "LINE";
+  groupEls.forEach(g => {
+    const applies = g.dataset.charts.split(",").includes(t);
+    g.classList.toggle("type-hidden", !applies);
+  });
+}
+
 document.getElementById("searchInput").addEventListener("input", e => {
   const q = e.target.value.toLowerCase().trim();
   document.querySelectorAll(".group").forEach(g => {
+    if (g.classList.contains("type-hidden")) return; // never reveal non-applicable groups
     if (!q) {
       g.classList.remove("hidden");
       g.querySelectorAll(".field").forEach(f => f.classList.remove("hidden"));
@@ -2115,13 +2632,23 @@ function burstConfetti(x, y) {
 }
 
 /* CHANGE HANDLER */
+let lastChartType = config.chartType;
 function onChange() {
   config = readForm();
   if (config.defaultSelectedIndex != null && config.defaultSelectedIndex >= 0) {
     selectedIndex = config.defaultSelectedIndex;
   }
   updateJsonEditor();
-  render();
+  if (config.chartType !== lastChartType) {
+    lastChartType = config.chartType;
+    selectedIndex = null;
+    refreshVisibility();
+    document.getElementById("searchInput").value = "";
+    document.querySelectorAll(".field.hidden, .group.hidden").forEach(el => el.classList.remove("hidden"));
+    animateChart();
+  } else {
+    render();
+  }
 }
 
 /* MODAL & HELP */
@@ -2184,6 +2711,7 @@ document.addEventListener("keydown", (e) => {
 
 /* INIT */
 writeForm(config);
+refreshVisibility();
 updateJsonEditor();
 animateChart();
 window.addEventListener("resize", render);
