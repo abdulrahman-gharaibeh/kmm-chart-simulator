@@ -1169,18 +1169,23 @@
         Chart Data
         <span class="badge" id="dataCount">12 pts</span>
       </h3>
-      <textarea id="dataInput">Jan,45
-Feb,80
-Mar,30
-Apr,95
-May,60
-Jun,70
-Jul,50
-Aug,110
-Sep,85
-Oct,40
-Nov,65
-Dec,90</textarea>
+      <textarea id="dataInput">series: Sales, Revenue, Profit
+Jan,45,30,18
+Feb,80,55,32
+Mar,30,40,15
+Apr,95,70,45
+May,60,52,28
+Jun,70,66,38
+Jul,50,48,22
+Aug,110,85,60
+Sep,85,72,40
+Oct,40,38,20
+Nov,65,58,30
+Dec,90,76,52</textarea>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:6px;line-height:1.4">
+        <b>Multi-Line:</b> add value columns per row (<code>label, s1, s2, s3</code>) &amp; name them with a <code>series:</code> line.
+        Other charts use column&nbsp;1 only.
+      </div>
     </div>
 
     <div id="formArea"></div>
@@ -1500,14 +1505,52 @@ SCHEMA.forEach(g => g.fields.forEach(f => defaultConfig[f.key] = f.default));
 let config = { ...defaultConfig };
 let selectedIndex = config.defaultSelectedIndex;
 let data = parseData(document.getElementById("dataInput").value);
+let multi = null;            // { labels, series } for MULTI_LINE
+let seriesVisible = {};      // legend toggle state by series name
+let mlLegend = [];           // legend hitboxes [{name,x,y,w,h}]
 let drawAnimProgress = 1;
 let chartBg = "white";
 
+function rebuildMulti() {
+  multi = parseMultiSeries(document.getElementById("dataInput").value);
+  const next = {};
+  multi.series.forEach(s => { next[s.name] = (s.name in seriesVisible) ? seriesVisible[s.name] : true; });
+  seriesVisible = next;
+}
+
 function parseData(text) {
-  return text.trim().split("\n").map(line => {
-    const [label, value] = line.split(",").map(s => s.trim());
-    return { label, value: parseFloat(value) || 0 };
-  }).filter(d => d.label);
+  return text.trim().split("\n")
+    .filter(l => !/^\s*series\s*:/i.test(l))
+    .map(line => {
+      const [label, value] = line.split(",").map(s => s.trim());
+      return { label, value: parseFloat(value) || 0 };
+    }).filter(d => d.label);
+}
+
+/* MULTI-SERIES parser — supports `label, v1, v2, v3` rows.
+   Optional first line: `series: Sales, Revenue, Profit` to name series.
+   1 value column => single series (matches DynamicChart's MULTI_LINE wrap). */
+function parseMultiSeries(text) {
+  const lines = text.trim().split("\n").map(l => l.trim()).filter(Boolean);
+  let names = null;
+  const rows = [];
+  for (const ln of lines) {
+    const m = ln.match(/^series\s*:(.*)$/i);
+    if (m) { names = m[1].split(",").map(s => s.trim()).filter(Boolean); continue; }
+    const parts = ln.split(",").map(s => s.trim());
+    rows.push({ label: parts[0], vals: parts.slice(1).map(v => parseFloat(v) || 0) });
+  }
+  const seriesCount = Math.max(1, ...rows.map(r => r.vals.length));
+  const labels = rows.map(r => r.label);
+  const series = [];
+  for (let s = 0; s < seriesCount; s++) {
+    series.push({
+      name: (names && names[s]) || `Series ${s + 1}`,
+      color: s === 0 ? config.lineColor : PALETTE[(s + 1) % PALETTE.length],
+      values: rows.map(r => r.vals[s] != null ? r.vals[s] : (r.vals[0] || 0)),
+    });
+  }
+  return { labels, series };
 }
 
 /* FORM */
@@ -2299,109 +2342,189 @@ function renderHorizontalBar() {
   });
 }
 
+/* SDK MultiLine smooth path: midpoint control points (no curveTension),
+   only when points >= 3, else straight. */
+function mlPath(pts, smooth) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  if (smooth && pts.length >= 3) {
+    for (let i = 1; i < pts.length; i++) {
+      const pr = pts[i - 1], cu = pts[i];
+      const mx = pr.x + (cu.x - pr.x) / 2;
+      ctx.bezierCurveTo(mx, pr.y, mx, cu.y, cu.x, cu.y);
+    }
+  } else {
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════
-   MULTI-LINE  — mirrors MultiLineChart.kt (single series in sim)
+   MULTI-LINE  — mirrors MultiLineChart.kt
+   Multiple series · interactive legend · shared Y-scale ·
+   multi-series tooltip · SDK midpoint smoothing
    ═══════════════════════════════════════════════════════════════ */
 function renderMultiLine() {
   const c = config;
-  const items = data;
+  if (!multi) rebuildMulti();
   const cssWidth = canvas.clientWidth || 700;
   const plotH = c.chartHeight || 250;
-  const cssHeight = plotH + 36;
+  const legendH = 34;
+  const cssHeight = legendH + plotH;
   sizeCanvas(cssWidth, cssHeight);
   if (c.showCardContainer) {
     ctx.fillStyle = parseColor(c.cardBackgroundColor, "#FFFFFF");
     roundRect(ctx, 0, 0, cssWidth, cssHeight, c.cardCornerRadius); ctx.fill();
   }
-  if (!items.length) return;
+  const labels = multi.labels;
+  const allSeries = multi.series;
+  if (!labels.length || !allSeries.length) return;
+
+  // ── Interactive legend (always shown — defining MultiLine feature) ──
+  mlLegend = [];
+  ctx.font = "600 12px Inter, sans-serif";
+  ctx.textBaseline = "middle";
+  let lx = 12;
+  allSeries.forEach((s, i) => {
+    if (i === 0) s.color = c.lineColor;       // series 1 follows lineColor config
+    const vis = seriesVisible[s.name] !== false;
+    const tw = ctx.measureText(s.name).width;
+    const itemW = 14 + 6 + tw + 18;
+    // dot
+    ctx.fillStyle = vis ? s.color : withAlpha(s.color, 0.3);
+    ctx.beginPath(); ctx.arc(lx + 6, legendH / 2, 6, 0, Math.PI * 2); ctx.fill();
+    // label
+    ctx.fillStyle = vis ? (chartBg === "white" ? "#111827" : "#e5e7eb") : "#9ca3af";
+    ctx.font = `${vis ? 600 : 400} 12px Inter, sans-serif`;
+    ctx.textAlign = "left";
+    ctx.fillText(s.name, lx + 18, legendH / 2);
+    mlLegend.push({ name: s.name, x: lx, y: 0, w: itemW, h: legendH });
+    lx += itemW;
+  });
+
+  const visSeries = allSeries.filter(s => seriesVisible[s.name] !== false);
+
+  // ── Plot area (SDK Canvas padding) ──
   const padL = c.showYAxisLabels ? 40 : 8, padR = 8, padT = 8, padB = 24;
-  const left = padL, right = cssWidth - padR, top = padT, bottom = plotH - padB;
+  const left = padL, right = cssWidth - padR;
+  const top = legendH + padT, bottom = cssHeight - padB;
   const w = right - left, h = bottom - top;
-  const maxV = Math.max(...items.map(d => d.value));
-  const minV = Math.min(...items.map(d => d.value), 0);
+
+  // ── Shared scale across visible series (SDK: max=allMax, min=min>0?0:min) ──
+  const allVals = visSeries.flatMap(s => s.values);
+  const maxV = allVals.length ? Math.max(...allVals) : 100;
+  const rawMin = allVals.length ? Math.min(...allVals) : 0;
+  const minV = rawMin > 0 ? 0 : rawMin;
   const range = (maxV - minV) || 1;
+  const n = labels.length;
   const p = drawAnimProgress;
 
-  // horizontal grid (5 lines) — SDK MultiLine draws these
-  ctx.strokeStyle = "rgba(180,185,200,0.35)"; ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y = top + h * i / 4;
-    ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
+  // gridDisplayMode → SDK showGridLines / showVerticalGrid
+  const gm = c.gridDisplayMode;
+  const showH = gm === "HORIZONTAL" || gm === "BOTH";
+  const showV = gm === "VERTICAL" || gm === "BOTH";
+
+  if (showH) {
+    ctx.strokeStyle = "rgba(180,185,200,0.35)"; ctx.lineWidth = 1;
+    for (let i = 0; i <= 5; i++) {
+      const y = top + h * i / 5;
+      ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
+    }
   }
-  // y-axis labels
+  if (showV && n > 0) {
+    ctx.strokeStyle = "rgba(180,185,200,0.22)"; ctx.lineWidth = 1;
+    for (let i = 0; i < n; i++) {
+      const x = left + (n === 1 ? w / 2 : w * i / (n - 1));
+      ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke();
+    }
+  }
   if (c.showYAxisLabels) {
     ctx.fillStyle = "#9ca3af"; ctx.font = "10px Inter, sans-serif";
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
-    for (let i = 0; i <= 4; i++) {
-      const v = maxV - (range * i / 4);
-      const y = top + h * i / 4;
-      ctx.fillText(Math.abs(v) >= 1000 ? (v/1000).toFixed(0)+"K" : Math.round(v), left - 8, y);
+    for (let i = 0; i <= 5; i++) {
+      const v = maxV - range * i / 5;
+      const y = top + h * i / 5;
+      ctx.fillText(Math.abs(v) >= 1000 ? (v / 1000).toFixed(0) + "K" : Math.round(v), left - 8, y);
     }
   }
-  const pts = items.map((it, i) => ({
-    x: left + (items.length === 1 ? w/2 : w * i / (items.length - 1)),
-    y: bottom - ((it.value - minV) / range) * h,
-    item: it
-  }));
+
+  const xAt = i => left + (n === 1 ? w / 2 : w * i / (n - 1));
+  const yAt = v => top + h * (1 - (v - minV) / range);
   const clipX = left + w * p;
+
   ctx.save(); ctx.beginPath(); ctx.rect(0, 0, clipX, cssHeight); ctx.clip();
-
-  // glow layers
-  if (c.enableLineGlow && c.lineGlowAlpha > 0) {
-    const fade = c.hideGlowAfterAnimation ? Math.max(0, 1 - Math.max(0, (p - 0.85)) * 6.67) : 1;
-    if (fade > 0.01) {
-      ctx.save();
-      ctx.shadowBlur = c.lineGlowRadius;
-      ctx.shadowColor = withAlpha(c.lineGlowColor || c.lineColor, c.lineGlowAlpha * fade);
-      drawLineStroke(c, pts, true); ctx.restore();
+  visSeries.forEach(s => {
+    const pts = s.values.map((v, i) => ({ x: xAt(i), y: yAt(v) }));
+    if (pts.length >= 2) {
+      if (c.enableLineGlow && c.lineGlowAlpha > 0) {
+        const fade = c.hideGlowAfterAnimation ? Math.max(0, 1 - Math.max(0, (p - 0.85)) * 6.67) : 1;
+        if (fade > 0.01) {
+          ctx.save();
+          ctx.shadowBlur = c.lineGlowRadius;
+          ctx.shadowColor = withAlpha(c.lineGlowColor || s.color, c.lineGlowAlpha * fade);
+          ctx.strokeStyle = s.color; ctx.lineWidth = c.lineWidth;
+          ctx.lineJoin = "round"; ctx.lineCap = "round";
+          mlPath(pts, c.smoothCurve); ctx.stroke();
+          ctx.restore();
+        }
+      }
+      ctx.strokeStyle = s.color; ctx.lineWidth = c.lineWidth;
+      ctx.lineJoin = "round"; ctx.lineCap = "round";
+      mlPath(pts, c.smoothCurve); ctx.stroke();
     }
-  }
-  drawLineStroke(c, pts, false);
-  ctx.restore();
-
-  // points
-  pts.forEach((pt, i) => {
-    if (pt.x > clipX) return;
-    const isSel = i === selectedIndex;
-    const r = (c.pointMarkerSize / 2) * (isSel ? 1.5 : 1);
-    ctx.fillStyle = "#fff";
-    ctx.beginPath(); ctx.arc(pt.x, pt.y, r + 2, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = c.lineColor;
-    ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, Math.PI*2); ctx.fill();
+    // points (LineData.showPoints default true)
+    pts.forEach((pt, i) => {
+      if (pt.x > clipX) return;
+      const isSel = i === selectedIndex;
+      const r = (c.pointMarkerSize / 2) * (isSel ? 1.5 : 1);
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, r + 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = s.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2); ctx.fill();
+    });
   });
+  ctx.restore();
 
   // x labels (≤6 all, else first/mid/last)
   ctx.fillStyle = "#9ca3af"; ctx.font = "10px Inter, sans-serif";
   ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
-  const showIdx = items.length <= 6
-    ? items.map((_, i) => i)
-    : [0, Math.floor(items.length / 2), items.length - 1];
-  showIdx.forEach(i => ctx.fillText(items[i].label, pts[i].x, plotH + 4));
+  const showIdx = n <= 6 ? labels.map((_, i) => i) : [0, Math.floor(n / 2), n - 1];
+  showIdx.forEach(i => ctx.fillText(labels[i], xAt(i), bottom + 16));
 
-  // crosshair + tooltip
-  if (selectedIndex != null && selectedIndex < pts.length && p >= 1) {
-    const sp = pts[selectedIndex];
-    ctx.strokeStyle = "rgba(128,128,128,0.5)"; ctx.lineWidth = 1;
-    ctx.setLineDash([10, 10]);
-    ctx.beginPath(); ctx.moveTo(sp.x, top); ctx.lineTo(sp.x, bottom); ctx.stroke();
-    ctx.setLineDash([]);
-    const it = items[selectedIndex];
-    const t1 = it.label, t2 = `${Math.round(it.value)}`;
+  // crosshair + multi-series tooltip
+  if (selectedIndex != null && selectedIndex < n && p >= 1) {
+    const sx = xAt(selectedIndex);
+    if (c.showCrosshairVertical) {
+      ctx.strokeStyle = "rgba(128,128,128,0.5)"; ctx.lineWidth = 1;
+      ctx.setLineDash([10, 10]);
+      ctx.beginPath(); ctx.moveTo(sx, top); ctx.lineTo(sx, bottom); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    const title = labels[selectedIndex];
+    const rows = visSeries.map(s => ({ name: s.name, color: s.color, val: Math.round(s.values[selectedIndex]) }));
     ctx.font = "bold 13px Inter, sans-serif";
-    const tw = Math.max(ctx.measureText(t1).width, ctx.measureText(t2).width) + 24;
-    const th = 46;
-    let tx = sp.x - tw/2;
+    let tw = ctx.measureText(title).width;
+    ctx.font = "500 12px Inter, sans-serif";
+    rows.forEach(r => { tw = Math.max(tw, ctx.measureText(`${r.name}: ${r.val}`).width + 18); });
+    tw += 24;
+    const th = 28 + rows.length * 20;
+    let tx = sx - tw / 2;
     tx = Math.max(4, Math.min(tx, cssWidth - tw - 4));
+    const ty = top + 4;
     ctx.fillStyle = "#ffffff";
-    ctx.shadowBlur = 12; ctx.shadowColor = "rgba(0,0,0,0.18)";
-    roundRect(ctx, tx, 6, tw, th, 8); ctx.fill();
+    ctx.shadowBlur = 14; ctx.shadowColor = "rgba(0,0,0,0.18)";
+    roundRect(ctx, tx, ty, tw, th, 8); ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.fillStyle = "#111827"; ctx.textAlign = "center";
+    ctx.fillStyle = "#111827"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
     ctx.font = "bold 13px Inter, sans-serif";
-    ctx.fillText(t1, tx + tw/2, 24);
-    ctx.fillStyle = c.lineColor;
-    ctx.font = "bold 14px Inter, sans-serif";
-    ctx.fillText(t2, tx + tw/2, 42);
+    ctx.fillText(title, tx + 12, ty + 19);
+    rows.forEach((r, i) => {
+      const ry = ty + 36 + i * 20;
+      ctx.fillStyle = r.color;
+      ctx.beginPath(); ctx.arc(tx + 16, ry - 4, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#374151";
+      ctx.font = "500 12px Inter, sans-serif";
+      ctx.fillText(`${r.name}: ${r.val}`, tx + 28, ry);
+    });
   }
 }
 
@@ -2486,15 +2609,31 @@ canvas.addEventListener("click", (e) => {
       const cyi = topOffset + i*rowH + barH/2;
       if (Math.abs(y - cyi) <= barH/2 + rowGap/2) { hit = i; break; }
     }
+  } else if (t === "MULTI_LINE") {
+    if (!multi) rebuildMulti();
+    // 1) legend hit → toggle that series' visibility
+    const leg = mlLegend.find(L => x >= L.x && x <= L.x + L.w && y >= L.y && y <= L.y + L.h);
+    if (leg) {
+      seriesVisible[leg.name] = seriesVisible[leg.name] === false;
+      render();
+      return;
+    }
+    // 2) point select — SDK: floor(localX / segmentWidth) coerced to [0, n-1]
+    const n = multi.labels.length;
+    if (!n) return;
+    const padL = config.showYAxisLabels ? 40 : 8;
+    const left = padL, right = canvas.clientWidth - 8;
+    const segW = (right - left) / Math.max(1, n - 1);
+    const idx = Math.max(0, Math.min(n - 1, Math.floor((x - left) / segW + 0.5)));
+    hit = idx;
   } else {
-    // LINE / MULTI_LINE — nearest point by x
-    const items = (t === "MULTI_LINE") ? data : processData(data, config);
+    // LINE — nearest point by x within half-spacing
+    const items = processData(data, config);
     if (!items.length) return;
-    const ml = t === "MULTI_LINE";
-    const yAxisWidth = config.showYAxisLabels ? (ml ? 40 : 50) : (ml ? 8 : 0);
+    const yAxisWidth = config.showYAxisLabels ? 50 : 0;
     const onEnd = config.yAxisPosition === "END";
-    const chartLeft = (ml ? yAxisWidth : config.chartPaddingStart + (onEnd ? 0 : yAxisWidth));
-    const chartRight = canvas.clientWidth - (ml ? 8 : config.chartPaddingEnd + (onEnd ? yAxisWidth : 0));
+    const chartLeft = config.chartPaddingStart + (onEnd ? 0 : yAxisWidth);
+    const chartRight = canvas.clientWidth - config.chartPaddingEnd - (onEnd ? yAxisWidth : 0);
     const chartWidth = chartRight - chartLeft;
     const spacing = items.length === 1 ? chartWidth : chartWidth / (items.length - 1);
     let closestDist = Infinity;
@@ -2571,6 +2710,7 @@ document.getElementById("replayBtn").addEventListener("click", animateChart);
 
 document.getElementById("dataInput").addEventListener("input", () => {
   data = parseData(document.getElementById("dataInput").value);
+  rebuildMulti();
   const badge = document.getElementById("dataCount");
   badge.textContent = data.length + " pts";
   badge.classList.add("pop");
@@ -2741,6 +2881,7 @@ document.addEventListener("keydown", (e) => {
 /* INIT */
 writeForm(config);
 refreshVisibility();
+rebuildMulti();
 updateJsonEditor();
 animateChart();
 window.addEventListener("resize", render);
