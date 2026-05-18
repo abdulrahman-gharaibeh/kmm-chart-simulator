@@ -2025,6 +2025,23 @@ function drawChips(c, items, chartLeft, chartRight, y) {
 /* ═══════════════════════════════════════════════════════════════
    PIE / DONUT  — mirrors DynamicPieChart.kt
    ═══════════════════════════════════════════════════════════════ */
+function pieGeometry(c, cssWidth, cssHeight) {
+  // Mirrors DynamicPieChart.kt lines 418-421:
+  //   strokeWidth = thickness; outerRadius = min(w,h)/2 - strokeWidth/2;
+  //   innerRadius = outerRadius * centerHoleSize
+  const thickness = Math.max(1, c.thickness || 16);
+  const labelMargin = c.showOuterLabels ? (c.labelDistance + 54) : 10;
+  const maxScale = (c.enableClickAnimation ? (c.clickScale || 1.1) : 1);
+  const half = Math.min(cssWidth, cssHeight) / 2;
+  // available box for the pie, leaving room for labels + selected pop-out
+  let outerRadius = half - labelMargin - thickness / 2;
+  // ensure the scaled segment (clickScale) + half stroke never exceeds the box
+  outerRadius = Math.min(outerRadius, (half - thickness / 2) / maxScale - 2);
+  outerRadius = Math.max(8, outerRadius);
+  const innerRadius = outerRadius * (c.centerHoleSize || 0);
+  return { thickness, outerRadius, innerRadius };
+}
+
 function renderPie() {
   const c = config;
   const items = data;
@@ -2038,8 +2055,8 @@ function renderPie() {
   if (!items.length) return;
   const total = items.reduce((s, d) => s + d.value, 0) || 1;
   const cx = cssWidth / 2, cy = cssHeight / 2;
-  const labelPad = c.showOuterLabels ? (c.labelDistance + 46) : 16;
-  const radius = Math.max(20, Math.min(cssWidth, cssHeight) / 2 - labelPad);
+  const { thickness, outerRadius, innerRadius } = pieGeometry(c, cssWidth, cssHeight);
+  const isDonut = (c.centerHoleSize || 0) > 0;
 
   const scalePct = c.scalePercentage ?? 1;
   const totalSweepDeg = 360 * scalePct;
@@ -2052,53 +2069,60 @@ function renderPie() {
   let cursor = startDeg;
   items.forEach((item, i) => {
     const fullSweep = (item.value / total) * totalSweepDeg - gapDeg;
-    // entry animation
     let segProg;
     if (c.sweepFromZero) {
-      const segDur = 1 / n, segStart = i / n;
-      segProg = Math.min(1, Math.max(0, (p - segStart) / segDur));
+      const segStart = i / n, segEnd = (i + 1) / n;
+      segProg = p < segStart ? 0 : Math.min(1, Math.max(0, (p - segStart) / (segEnd - segStart)));
     } else { segProg = p; }
     const sweep = Math.max(0, fullSweep * segProg);
-    const a0 = cursor * D2R;
-    const a1 = (cursor + sweep) * D2R;
-    const mid = (cursor + sweep / 2) * D2R;
+    if (sweep <= 0) { cursor += fullSweep + gapDeg; return; }
 
     const isSel = i === selectedIndex;
-    let ox = 0, oy = 0, r = radius;
-    if (isSel && c.enableClickAnimation) {
-      ox = Math.cos(mid) * 6; oy = Math.sin(mid) * 6;
-      r = radius * (c.clickScale || 1.1);
-    }
+    const scale = (isSel && c.enableClickAnimation) ? (c.clickScale || 1.1) : 1;
+    const segR = outerRadius * scale;
+    const segIR = innerRadius * scale;
+    const offD = (isSel && c.enableClickAnimation) ? 6 : 0;
+    const midDeg = cursor + sweep / 2;
+    const midRad = midDeg * D2R;
+    const ox = offD * Math.cos(midRad), oy = offD * Math.sin(midRad);
+    const a0 = cursor * D2R, a1 = (cursor + sweep) * D2R;
     const col = PALETTE[i % PALETTE.length];
-    const innerR = (c.centerHoleSize > 0) ? r * c.centerHoleSize : 0;
 
-    ctx.beginPath();
-    if (innerR > 0) {
-      ctx.arc(cx + ox, cy + oy, r, a0, a1);
-      ctx.arc(cx + ox, cy + oy, innerR, a1, a0, true);
+    if (isDonut) {
+      // Filled donut segment (drawDonutSegment): outer arc → line in → inner arc reversed
+      ctx.beginPath();
+      ctx.arc(cx + ox, cy + oy, segR, a0, a1, false);
+      ctx.arc(cx + ox, cy + oy, segIR, a1, a0, true);
+      ctx.closePath();
+      ctx.fillStyle = col;
+      ctx.fill();
     } else {
-      ctx.moveTo(cx + ox, cy + oy);
-      ctx.arc(cx + ox, cy + oy, r, a0, a1);
+      // PIE = a STROKED arc whose band width = thickness (SDK drawArc + Stroke)
+      ctx.beginPath();
+      ctx.arc(cx + ox, cy + oy, segR, a0, a1, false);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = thickness * scale;
+      ctx.lineCap = "round";
+      ctx.stroke();
     }
-    ctx.closePath();
-    ctx.fillStyle = col;
-    ctx.fill();
 
-    // labels
-    if (c.showOuterLabels && sweep > 0.5) {
-      const lr = radius + c.labelDistance;
-      const lx = cx + Math.cos(mid) * lr;
-      const ly = cy + Math.sin(mid) * lr;
+    // labels — SDK places at (chartSize/2 + labelDistance) along mid-angle
+    if (c.showOuterLabels && sweep > 1) {
+      const lr = outerRadius + thickness / 2 + c.labelDistance;
+      let lx = cx + Math.cos(midRad) * lr;
+      let ly = cy + Math.sin(midRad) * lr;
+      const right = Math.cos(midRad) >= 0;
+      ly = Math.max(14, Math.min(cssHeight - 22, ly));
       ctx.fillStyle = chartBg === "white" ? "#1f2937" : "#e5e7eb";
-      ctx.font = `500 ${c.labelTextSize}px Inter, sans-serif`;
-      ctx.textAlign = Math.cos(mid) >= 0 ? "left" : "right";
+      ctx.font = `600 ${c.labelTextSize}px Inter, sans-serif`;
+      ctx.textAlign = right ? "left" : "right";
       ctx.textBaseline = "middle";
-      ctx.fillText(item.label, lx + (Math.cos(mid) >= 0 ? 4 : -4), ly - (c.showPercentageRectangles ? 9 : 0));
+      ctx.fillText(item.label, lx + (right ? 4 : -4), ly - (c.showPercentageRectangles ? 9 : 0));
       if (c.showPercentageRectangles) {
         const pct = Math.round((item.value / total) * 100) + "%";
         ctx.font = "600 10px Inter, sans-serif";
         const tw = ctx.measureText(pct).width + 12;
-        const bx = ctx.textAlign === "left" ? lx + 4 : lx - 4 - tw;
+        const bx = right ? lx + 4 : lx - 4 - tw;
         ctx.fillStyle = withAlpha(col, 0.9);
         roundRect(ctx, bx, ly + 3, tw, 16, 8); ctx.fill();
         ctx.fillStyle = "#fff";
@@ -2108,6 +2132,9 @@ function renderPie() {
     }
     cursor += fullSweep + gapDeg;
   });
+
+  // Center hole stays empty (donut) — nothing to draw; pie ring already has
+  // an implicit empty core of radius (outerRadius - thickness).
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -2419,20 +2446,22 @@ canvas.addEventListener("click", (e) => {
     const total = items.reduce((s, d) => s + d.value, 0) || 1;
     const dx = x - cx, dy = y - cy;
     const dist = Math.sqrt(dx*dx + dy*dy);
-    const labelPad = config.showOuterLabels ? (config.labelDistance + 46) : 16;
-    const radius = Math.max(20, Math.min(cssW, cssH) / 2 - labelPad);
-    const innerR = config.centerHoleSize > 0 ? radius * config.centerHoleSize : 0;
-    if (dist <= radius * (config.clickScale || 1.1) && dist >= innerR) {
+    const { thickness, outerRadius, innerRadius } = pieGeometry(config, cssW, cssH);
+    const maxScale = (config.enableClickAnimation ? (config.clickScale || 1.1) : 1);
+    const isDonut = (config.centerHoleSize || 0) > 0;
+    // Hit band: donut = [innerRadius, outerRadius]; pie ring = outerRadius ± thickness/2
+    const hitOuter = (isDonut ? outerRadius : outerRadius + thickness / 2) * maxScale + 6;
+    const hitInner = isDonut ? innerRadius : (outerRadius - thickness / 2);
+    if (dist <= hitOuter && dist >= hitInner - 4) {
       let ang = Math.atan2(dy, dx) * 180 / Math.PI; // -180..180
       const scalePct = config.scalePercentage ?? 1;
       const totalSweepDeg = 360 * scalePct;
       const startDeg = scalePct >= 1 ? -90 : (270 - totalSweepDeg / 2);
       let rel = (ang - startDeg) % 360; if (rel < 0) rel += 360;
-      const gapDeg = (items.length > 1 && scalePct >= 1) ? 2 : 0;
       let cur = 0;
       for (let i = 0; i < items.length; i++) {
         const seg = (items[i].value / total) * totalSweepDeg;
-        if (rel >= cur && rel < cur + seg) { hit = i; break; }
+        if (rel >= cur && rel < cur + seg && rel <= totalSweepDeg) { hit = i; break; }
         cur += seg;
       }
     }
