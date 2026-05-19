@@ -1426,7 +1426,9 @@ const SCHEMA = [
     { key: "scrubbingGlowAlpha", type: "float", default: 0.7 },
   ]},
   { group: "Data Points", icon: "⚫", charts: ["LINE"], fields: [
+    { key: "showPointMarkers", type: "bool", default: true },
     { key: "showAllDataPoints", type: "bool", default: false },
+    { key: "pointMarkerColor", type: "color", default: null, nullable: true },
     { key: "dataPointsWithBackground", type: "bool", default: true },
     { key: "dataPointBackgroundColor", type: "color", default: null, nullable: true },
   ]},
@@ -1459,6 +1461,8 @@ const SCHEMA = [
     { key: "abbreviateYAxisLabels", type: "bool", default: true },
     { key: "groupValueLabels", type: "bool", default: true },
     { key: "valueLabelSuffix", type: "string", default: "" },
+    { key: "groupingSeparator", type: "string", default: "" },   // empty = browser locale
+    { key: "decimalSeparator", type: "string", default: "." },
   ]},
 ];
 
@@ -1747,20 +1751,29 @@ function niceAxis(min, max, tickCount = 5) {
 }
 
 /* ── Transaction Graph Widget number formatting (mirrors SDK ChartNumberFormatter) ── */
-function fmtAbbrev(v) {                 // Y-axis: K / M, 1-decimal truncated, .0 dropped
+function fmtAbbrev(v, dec) {              // Y-axis: K / M, 1-decimal truncated, .0 dropped
+  dec = dec || ".";
   const neg = v < 0, a = Math.abs(v);
   let s;
   if (a < 1000) s = String(Math.round(a));
   else if (a < 1e6) s = String(Math.floor((a / 1e3) * 10) / 10) + "K";
   else s = String(Math.floor((a / 1e6) * 10) / 10) + "M";
+  if (dec !== ".") s = s.replace(".", dec);
   return (neg && a >= 1) ? "-" + s : s;
 }
-function fmtGrouped(v) {                 // locale thousands separator (browser locale)
-  return Math.round(v).toLocaleString();
+function fmtGrouped(v, sep) {             // sep falsy = browser locale; else force char
+  const n = Math.round(v);
+  if (!sep) return n.toLocaleString();
+  const neg = n < 0, d = String(Math.abs(n));
+  if (d.length <= 3) return (neg ? "-" : "") + d;
+  let out = "", lead = d.length % 3;
+  if (lead > 0) out = d.slice(0, lead);
+  for (let i = lead; i < d.length; i += 3) out += (out ? sep : "") + d.slice(i, i + 3);
+  return (neg ? "-" : "") + out;
 }
 function fmtValue(v, c) {                 // grouped value + optional unit suffix
   if (!c.groupValueLabels) return String(Math.round(v));
-  const g = fmtGrouped(v);
+  const g = fmtGrouped(v, c.groupingSeparator);
   return c.valueLabelSuffix ? g + " " + c.valueLabelSuffix : g;
 }
 
@@ -1864,7 +1877,7 @@ function renderLine() {
     for (let i = 0; i <= steps; i++) {
       const value = axis.min + (axis.step * i);
       const y = plotBottom - (plotHeight * i / steps);
-      ctx.fillText(c.abbreviateYAxisLabels ? fmtAbbrev(value) : String(Math.round(value)), labelX, y);
+      ctx.fillText(c.abbreviateYAxisLabels ? fmtAbbrev(value, c.decimalSeparator) : String(Math.round(value)), labelX, y);
     }
   }
 
@@ -1944,8 +1957,8 @@ function renderLine() {
   points.forEach((p, i) => {
     if (p.x > clipX) return;
     const isSelected = i === selectedIndex;
-    if (c.showAllDataPoints || isSelected) {
-      ctx.fillStyle = c.lineColor;
+    if (c.showPointMarkers && (c.showAllDataPoints || isSelected)) {
+      ctx.fillStyle = c.pointMarkerColor || c.lineColor;
       ctx.beginPath();
       ctx.arc(p.x, p.y, c.pointMarkerSize / 2 + (isSelected ? 2 : 0), 0, Math.PI * 2);
       ctx.fill();
