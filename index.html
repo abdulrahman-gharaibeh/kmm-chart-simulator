@@ -1455,6 +1455,11 @@ const SCHEMA = [
     { key: "bottomDividerColor", type: "color", default: "#80808080", argb: true },
     { key: "bottomDividerThickness", type: "int", default: 1, unit: "dp" },
   ]},
+  { group: "Number Format", icon: "🔢", charts: ["LINE"], fields: [
+    { key: "abbreviateYAxisLabels", type: "bool", default: true },
+    { key: "groupValueLabels", type: "bool", default: true },
+    { key: "valueLabelSuffix", type: "string", default: "" },
+  ]},
 ];
 
 const COLLAPSED_BY_DEFAULT = new Set([
@@ -1741,6 +1746,24 @@ function niceAxis(min, max, tickCount = 5) {
   };
 }
 
+/* ── Transaction Graph Widget number formatting (mirrors SDK ChartNumberFormatter) ── */
+function fmtAbbrev(v) {                 // Y-axis: K / M, 1-decimal truncated, .0 dropped
+  const neg = v < 0, a = Math.abs(v);
+  let s;
+  if (a < 1000) s = String(Math.round(a));
+  else if (a < 1e6) s = String(Math.floor((a / 1e3) * 10) / 10) + "K";
+  else s = String(Math.floor((a / 1e6) * 10) / 10) + "M";
+  return (neg && a >= 1) ? "-" + s : s;
+}
+function fmtGrouped(v) {                 // locale thousands separator (browser locale)
+  return Math.round(v).toLocaleString();
+}
+function fmtValue(v, c) {                 // grouped value + optional unit suffix
+  if (!c.groupValueLabels) return String(Math.round(v));
+  const g = fmtGrouped(v);
+  return c.valueLabelSuffix ? g + " " + c.valueLabelSuffix : g;
+}
+
 /* RENDERER */
 const canvas = document.getElementById("chartCanvas");
 const ctx = canvas.getContext("2d");
@@ -1841,7 +1864,7 @@ function renderLine() {
     for (let i = 0; i <= steps; i++) {
       const value = axis.min + (axis.step * i);
       const y = plotBottom - (plotHeight * i / steps);
-      ctx.fillText(String(Math.round(value)), labelX, y);
+      ctx.fillText(c.abbreviateYAxisLabels ? fmtAbbrev(value) : String(Math.round(value)), labelX, y);
     }
   }
 
@@ -1938,7 +1961,7 @@ function renderLine() {
     const p = points[selectedIndex];
     const item = items[selectedIndex];
     const text = item.label;
-    const valueText = String(Math.round(item.value));
+    const valueText = fmtValue(item.value, c);
     ctx.font = "bold 12px Inter, sans-serif";
     const labelW = ctx.measureText(text).width;
     ctx.font = "bold 14px Inter, sans-serif";
@@ -1987,7 +2010,7 @@ function renderLine() {
     ctx.fillStyle = c.lineColor;
     ctx.font = "bold 20px Inter, sans-serif";
     ctx.textAlign = "right";
-    ctx.fillText(String(Math.round(item.value)), cssWidth - 12, y + 10);
+    ctx.fillText(fmtValue(item.value, c), cssWidth - 12, y + 10);
     chipsY = y + 56;
   }
 
