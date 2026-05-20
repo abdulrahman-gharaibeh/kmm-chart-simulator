@@ -2678,6 +2678,14 @@ canvas.addEventListener("click", (e) => {
       const d = Math.abs(x - px);
       if (d < closestDist && d < spacing / 2) { hit = i; closestDist = d; }
     });
+    // Detect chip-row click — fires the SDK's onChipClick callback in real apps
+    if (hit >= 0 && config.showTopFilters && config.showXAxisLabels) {
+      const chartTop = config.chartPaddingTop;
+      const chartBottom = chartTop + (config.chartHeight || 250);
+      if (y >= chartBottom + 4 && y <= chartBottom + 36) {
+        showToast(`📍 onChipClick fired → "${items[hit].label}" (index ${hit})`);
+      }
+    }
   }
 
   selectedIndex = hit >= 0 ? (hit === selectedIndex ? null : hit) : null;
